@@ -107,7 +107,7 @@ const roshanBillSchema = new mongoose.Schema({
       SALEDISCAMT: mongoose.Schema.Types.Mixed
     }
   ]
-}, { collection: 'roshanbills', timestamps: false });
+}, { collection: 'migrationdata', timestamps: false });
 
 // Register the temporary migration model (if not already registered)
 const RoshanBill = mongoose.models.RoshanBill || mongoose.model('RoshanBill', roshanBillSchema);
@@ -122,7 +122,7 @@ function normalisePhone(phone) {
 }
 
 async function main() {
-  console.log("[Senior Dev] Starting high-performance migration using MongoDB 'roshanbills' collection...");
+  console.log("[Senior Dev] Starting high-performance migration using MongoDB 'migrationdata' collection...");
 
   // Validate ID structures
   if (!mongoose.Types.ObjectId.isValid(MIGRATION_ORG_ID)) {
@@ -138,11 +138,11 @@ async function main() {
   await connectDB();
 
   // Retrieve total count dynamically from the collection
-  console.log("Retrieving total records from 'roshanbills' collection...");
+  console.log("Retrieving total records from 'migrationdata' collection...");
   const dbCount = await RoshanBill.countDocuments();
   
   if (dbCount === 0) {
-    console.error("Error: The 'roshanbills' collection is empty or does not exist.");
+    console.error("Error: The 'migrationdata' collection is empty or does not exist.");
     await disconnectDB();
     return;
   }

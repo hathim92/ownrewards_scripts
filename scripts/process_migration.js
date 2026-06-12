@@ -250,7 +250,7 @@ async function processChunk(items, currentCount, totalRecords, startTime) {
           tax_total: 0,
           discount_total: item.discount || 0,
           created_on: billDate,
-          order_from: "migration",
+          order_from: "POS",
           comment: "Historical migration"
         },
         items: lineItems,

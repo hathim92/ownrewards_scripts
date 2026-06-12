@@ -164,6 +164,7 @@ async function main() {
     if (chunkItems.length === BATCH_SIZE) {
       await processChunk(chunkItems, lineCount, totalRecords, startTime);
       chunkItems = [];
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 

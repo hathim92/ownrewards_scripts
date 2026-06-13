@@ -107,7 +107,7 @@ const migrationDataSchema = new mongoose.Schema({
       SALEDISCAMT: mongoose.Schema.Types.Mixed
     }
   ]
-}, { collection: 'roshanbills', timestamps: false });
+}, { collection: 'migrationdata', timestamps: false });
 
 // Register the temporary migration model (if not already registered)
 const MigrationData = mongoose.models.MigrationData || mongoose.model('MigrationData', migrationDataSchema);

@@ -137,18 +137,7 @@ async function main() {
   console.log("Connecting to the database...");
   await connectDB();
 
-  // Retrieve total count dynamically from the collection
-  console.log("Retrieving total records from 'migrationdata' collection...");
-  const dbCount = await MigrationData.estimatedDocumentCount();
-  
-  if (dbCount === 0) {
-    console.error("Error: The 'migrationdata' collection is empty or does not exist.");
-    await disconnectDB();
-    return;
-  }
-
-  const totalRecords = dbCount;
-  console.log(`Found ${dbCount.toLocaleString()} total bills. Processing all bills.`);
+  console.log(`Starting to process all bills...`);
 
   console.log(`Starting cursor-based streaming in batches of ${BATCH_SIZE}...`);
   const cursor = MigrationData.find({}).lean().cursor({ batchSize: BATCH_SIZE });
@@ -157,12 +146,12 @@ async function main() {
   let chunkItems = [];
   let lineCount = 0;
 
-  for (let doc = await cursor.next(); doc != null; doc = await cursor.next()) {
+  for await (const doc of cursor) {
     lineCount++;
     chunkItems.push(doc);
 
     if (chunkItems.length === BATCH_SIZE) {
-      await processChunk(chunkItems, lineCount, totalRecords, startTime);
+      await processChunk(chunkItems, lineCount, startTime);
       chunkItems = [];
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
@@ -170,7 +159,7 @@ async function main() {
 
   // Process remaining items
   if (chunkItems.length > 0) {
-    await processChunk(chunkItems, lineCount, totalRecords, startTime);
+    await processChunk(chunkItems, lineCount, startTime);
   }
 
   const durationSec = Math.round((Date.now() - startTime) / 1000);
@@ -185,7 +174,7 @@ async function main() {
 /**
  * High-performance batch processor mirroring the CSV upload pipeline
  */
-async function processChunk(items, currentCount, totalRecords, startTime) {
+async function processChunk(items, currentCount, startTime) {
   const belongsTo = new mongoose.Types.ObjectId(MIGRATION_ORG_ID);
 
   // Group the raw batch items by resolved target outlet ID first
@@ -534,14 +523,13 @@ async function processChunk(items, currentCount, totalRecords, startTime) {
     await Promise.all(flushOps);
   }
 
-  logProgress(currentCount, totalRecords, startTime);
+  logProgress(currentCount, startTime);
 }
 
-function logProgress(currentCount, totalRecords, startTime) {
+function logProgress(currentCount, startTime) {
   const elapsedMs = Date.now() - startTime;
   const recordsPerSec = Math.round((currentCount / elapsedMs) * 1000);
-  const percentage = ((currentCount / totalRecords) * 100).toFixed(2);
-  console.log(`Processed ${currentCount.toLocaleString()} / ${totalRecords.toLocaleString()} (${percentage}%) | Velocity: ${recordsPerSec} rec/sec`);
+  console.log(`Processed ${currentCount.toLocaleString()} | Velocity: ${recordsPerSec} rec/sec`);
 }
 
 main().catch(err => {

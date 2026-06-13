@@ -139,7 +139,7 @@ async function main() {
 
   // Retrieve total count dynamically from the collection
   console.log("Retrieving total records from 'migrationdata' collection...");
-  const dbCount = await MigrationData.countDocuments();
+  const dbCount = await MigrationData.estimatedDocumentCount();
   
   if (dbCount === 0) {
     console.error("Error: The 'migrationdata' collection is empty or does not exist.");

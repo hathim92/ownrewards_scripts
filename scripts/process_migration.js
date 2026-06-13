@@ -107,7 +107,7 @@ const migrationDataSchema = new mongoose.Schema({
       SALEDISCAMT: mongoose.Schema.Types.Mixed
     }
   ]
-}, { collection: 'migrationdata', timestamps: false });
+}, { collection: 'roshanbills', timestamps: false });
 
 // Register the temporary migration model (if not already registered)
 const MigrationData = mongoose.models.MigrationData || mongoose.model('MigrationData', migrationDataSchema);
@@ -211,6 +211,8 @@ async function processChunk(items, currentCount, startTime) {
 
     for (const { item, phone } of outletItems) {
       const billDate = parseToDate(item.billDate) || new Date();
+      const orderNo = String(item.billNumber);
+      const orderId = `${orderNo}_${billDate.toISOString()}`;
 
       const lineItems = (item.lineItems || []).map(li => ({
         itemName: li.DESCRIPTION || 'Item',
@@ -232,7 +234,7 @@ async function processChunk(items, currentCount, startTime) {
           anniversary: parseToDate(item.anniversaryDate)
         },
         orderDetails: {
-          orderId: item.billNumber,
+          orderId: orderId,
           order_type: "unknown",
           payment_type: "unknown",
           core_total: Math.max(0, (item.billAmount || 0) - (item.discount || 0)),
@@ -241,7 +243,7 @@ async function processChunk(items, currentCount, startTime) {
           discount_total: item.discount || 0,
           created_on: billDate,
           order_from: "POS",
-          comment: "Historical migration"
+          comment: "Legacy Bill Import"
         },
         items: lineItems,
         loyaltyPointsEarned: Math.max(0, Number(item.loyaltyPoint) || 0),
@@ -259,9 +261,32 @@ async function processChunk(items, currentCount, startTime) {
 
     if (billObjects.length === 0) continue;
 
-    // 1. Resolve customer profiles from cache or DB for this specific outlet
+    // 1. Deduplicate bills BEFORE updating customer metrics
+    let billsToProcess = billObjects;
+    const orderIdsInChunk = billObjects.map(b => b.orderDetails.orderId).filter(Boolean);
+
+    if (orderIdsInChunk.length > 0) {
+      const existingBills = await Bill.find(
+        {
+          "orderDetails.orderId": { $in: orderIdsInChunk },
+          outletId,
+          belongsTo
+        },
+        { "orderDetails.orderId": 1, "customer.phoneNo": 1 }
+      ).lean();
+      
+      const existingSet = new Set(existingBills.map(b => `${b.orderDetails.orderId}_${b.customer?.phoneNo}`));
+
+      if (existingSet.size > 0) {
+        billsToProcess = billObjects.filter(b => !existingSet.has(`${b.orderDetails.orderId}_${b.customer.phoneNo}`));
+      }
+    }
+
+    if (billsToProcess.length === 0) continue;
+
+    // 2. Resolve customer profiles from cache or DB for this specific outlet
     const phonesNeeded = [...new Set(
-      billObjects.map(b => b.customer.phoneNo).filter(p => p && !customerCache[p])
+      billsToProcess.map(b => b.customer.phoneNo).filter(p => p && !customerCache[p])
     )];
 
     if (phonesNeeded.length > 0) {
@@ -284,9 +309,9 @@ async function processChunk(items, currentCount, startTime) {
       }
     }
 
-    // 2. Upsert customers using bulkWrite
+    // 3. Upsert customers using bulkWrite
     const customerOps = [];
-    for (const b of billObjects) {
+    for (const b of billsToProcess) {
       const phone = b.customer.phoneNo;
       customerOps.push({
         updateOne: {
@@ -321,7 +346,8 @@ async function processChunk(items, currentCount, startTime) {
               createdAt: b.orderDetails.created_on
             },
             $set: {
-              "transaction.balancePoints": b.rawLoyaltyPointsBalance
+              "transaction.balancePoints": b.rawLoyaltyPointsBalance,
+              isFirstCustomer: false
             }
           },
           upsert: true
@@ -333,8 +359,8 @@ async function processChunk(items, currentCount, startTime) {
       await Customer.bulkWrite(customerOps, { ordered: false, timestamps: false });
     }
 
-    // 3. Re-fetch customer ids (for newly inserted/updated customers)
-    const allPhones = [...new Set(billObjects.map(b => b.customer.phoneNo))];
+    // 4. Re-fetch customer ids (for newly inserted/updated customers)
+    const allPhones = [...new Set(billsToProcess.map(b => b.customer.phoneNo))];
     const freshCustomers = await Customer.find(
       { belongsTo, outletId, phoneNo: { $in: allPhones } },
       { _id: 1, phoneNo: 1, "transaction.balancePoints": 1, "transaction.EarnedPoints": 1, tier: 1 }
@@ -350,34 +376,14 @@ async function processChunk(items, currentCount, startTime) {
       };
     }
 
-    // 4. Link customers to bills
-    for (const b of billObjects) {
+    // 5. Link customers to bills
+    for (const b of billsToProcess) {
       const cust = phoneToCustomer[b.customer.phoneNo];
       b.customerId = cust?._id || null;
       b.customerTier = cust?.tier || "Bronze";
     }
 
-    // 5. Deduplicate bills
-    let billsToInsert = billObjects;
-    const orderIdsInChunk = billObjects.map(b => b.orderDetails.orderId).filter(Boolean);
-
-    if (orderIdsInChunk.length > 0) {
-      const existingOrderIds = await Bill.distinct(
-        "orderDetails.orderId",
-        {
-          "orderDetails.orderId": { $in: orderIdsInChunk },
-          outletId,
-          belongsTo
-        }
-      );
-      const existingSet = new Set(existingOrderIds.map(String));
-
-      if (existingSet.size > 0) {
-        billsToInsert = billObjects.filter(b => !existingSet.has(String(b.orderDetails.orderId)));
-      }
-    }
-
-    if (billsToInsert.length === 0) continue;
+    let billsToInsert = billsToProcess;
 
     // 6. insertMany bills
     let failedBillIds = new Set();
@@ -434,7 +440,7 @@ async function processChunk(items, currentCount, startTime) {
         referenceType: "bill",
         referenceId: billId,
         source: "migration",
-        comment: "Historical migration",
+        comment: "Legacy Bill Import",
         isProcessForSegment: false,
         createdAt: billDate
       });
@@ -452,7 +458,8 @@ async function processChunk(items, currentCount, startTime) {
               totalPointsEarned: pts
             },
             $min: { firstPurchaseAt: billDate },
-            $set: { lastPurchaseAt: billDate, updatedAt: now },
+            $max: { lastPurchaseAt: billDate },
+            $set: { updatedAt: now },
             $setOnInsert: {
               totalPointsRedeemed: 0
             }
@@ -492,7 +499,7 @@ async function processChunk(items, currentCount, startTime) {
           belongsTo,
           customerTier: bill.customerTier || "Bronze",
           manualTransactionType: "historical_migration",
-          description: "Historical migration points",
+          description: "Legacy Bill Import points",
           isRuleBased: false,
           isRewardBased: false
         });

@@ -17,7 +17,7 @@ const { parseToDate } = require('../utils/dateParser');
 // ==============================================================================
 
 // Target Organization ID (belongsTo)
-const MIGRATION_ORG_ID = "6a102b819a66acbf2f63a182"; // Example: Roshan Bags Organization
+const MIGRATION_ORG_ID = "6a2bf3bb92b2b0b73cb9e5b2"; // Example: Roshan Bags Organization
 
 // Fallback Outlet ID if a location is not listed in the map above
 const DEFAULT_OUTLET_ID = "6a23eed4797fb4e955c50f81"; 
@@ -74,8 +74,8 @@ const LOCATION_OUTLET_MAP = {
 
 const BATCH_SIZE = 5000;
 
-// Define the Schema for the imported roshanbills collection
-const roshanBillSchema = new mongoose.Schema({
+// Define the Schema for the imported migrationdata collection
+const migrationDataSchema = new mongoose.Schema({
   billNumber: String,
   billDate: mongoose.Schema.Types.Mixed,
   grossAmount: Number,
@@ -110,7 +110,7 @@ const roshanBillSchema = new mongoose.Schema({
 }, { collection: 'migrationdata', timestamps: false });
 
 // Register the temporary migration model (if not already registered)
-const RoshanBill = mongoose.models.RoshanBill || mongoose.model('RoshanBill', roshanBillSchema);
+const MigrationData = mongoose.models.MigrationData || mongoose.model('MigrationData', migrationDataSchema);
 
 function normalisePhone(phone) {
   if (!phone) return null;
@@ -139,7 +139,7 @@ async function main() {
 
   // Retrieve total count dynamically from the collection
   console.log("Retrieving total records from 'migrationdata' collection...");
-  const dbCount = await RoshanBill.countDocuments();
+  const dbCount = await MigrationData.countDocuments();
   
   if (dbCount === 0) {
     console.error("Error: The 'migrationdata' collection is empty or does not exist.");
@@ -151,7 +151,7 @@ async function main() {
   console.log(`Found ${dbCount.toLocaleString()} total bills. Processing all bills.`);
 
   console.log(`Starting cursor-based streaming in batches of ${BATCH_SIZE}...`);
-  const cursor = RoshanBill.find({}).lean().cursor({ batchSize: BATCH_SIZE });
+  const cursor = MigrationData.find({}).lean().cursor({ batchSize: BATCH_SIZE });
   const startTime = Date.now();
 
   let chunkItems = [];
